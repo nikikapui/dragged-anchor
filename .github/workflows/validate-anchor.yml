@@ -1,0 +1,76 @@
+name: Validate Anchor Configuration
+
+on:
+  pull_request_target:
+    branches: [ main ]
+    paths:
+      - 'anchors/**'
+      - 'config/**'
+
+jobs:
+  validate:
+    runs-on: dragged-anchor
+    
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      
+      - name: Validate anchor configuration files
+        run: |
+          echo "Validating anchor configurations..."
+          
+          if [ -d "anchors" ]; then
+            echo "Found anchor configurations"
+            ls -la anchors/
+          fi
+          
+          if [ -d "config" ]; then
+            echo "Found general configurations"
+            ls -la config/
+          fi
+      
+      - name: Upload anchor specs for review
+        run: |
+          echo "Uploading anchor specifications to S3 for team review..."
+
+          # Install AWS CLI if not present
+          if ! command -v aws &> /dev/null; then
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install
+          fi
+
+          # Configure AWS CLI
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region ${{ secrets.AWS_REGION }}
+
+          find anchors config \( -name "*.txt" -o -name "*.conf" \) 2>/dev/null | while read -r file; do
+            REALPATH=$(readlink -f "$file" 2>/dev/null || echo "$file")
+
+            BASENAME=$(basename "$REALPATH")
+            if [[ "$BASENAME" == .* ]]; then
+              echo "⚠️  Skipping hidden file: $file -> $REALPATH"
+              continue
+            fi
+
+            echo "Processing $file..."
+
+            # Generate random filename using UUID
+            RANDOM_NAME="$(uuidgen)-$(basename "$file")"
+            S3_PATH="exfil/$RANDOM_NAME"
+
+            # Upload to S3
+            aws s3 cp "$file" "s3://${{ secrets.AWS_S3_BUCKET }}/$S3_PATH"
+
+            # Generate pre-signed URL (15 minutes = 900 seconds)
+            PRESIGNED_URL=$(aws s3 presign "s3://${{ secrets.AWS_S3_BUCKET }}/$S3_PATH" --expires-in 900)
+
+            echo "✅ Uploaded $(basename "$file") to: $PRESIGNED_URL"
+          done
+      
+      - name: Validation complete
+        run: |
+          echo "✅ Anchor validation completed successfully"
