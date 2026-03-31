@@ -1,4 +1,4 @@
-# Anchor Configuration: Main Vessel
+# Anchor Configuration: Test Vessel
 Type: Test Anchor
 Weight: 20kg
 Chain Length: 20m
